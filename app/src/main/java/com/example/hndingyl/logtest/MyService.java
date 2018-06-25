@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.IBinder;
 import android.os.storage.StorageManager;
 import android.support.annotation.Nullable;
@@ -16,6 +17,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.lang.reflect.Method;
 
 public class MyService extends Service{
@@ -23,6 +25,11 @@ public class MyService extends Service{
     private String path = null;
     private String sdCardDir;
     private String fileName = "Log.txt";
+    private boolean isServiceActive = false;
+    private static final String clearLog = "logcat -c";
+    private SharedPreferences sharedPreferences;
+    private SharedPreferences.Editor editor;
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -36,6 +43,7 @@ public class MyService extends Service{
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId){
+        sharedPreferences = getSharedPreferences("user",Context.MODE_PRIVATE);
         if(getVolumePaths(MyService.this).length > 1)
             sdCardDir = getVolumePaths(MyService.this)[1];
         path = sdCardDir + "/" + fileName;
@@ -43,8 +51,11 @@ public class MyService extends Service{
         if(getVolumePaths(MyService.this).length>1) {
             Log.d("dingyl",getVolumePaths(MyService.this).length+"");
             Toast.makeText(MyService.this,"Print Log to : " + getVolumePaths(MyService.this)[1],Toast.LENGTH_SHORT).show();
-            MyThread myThread = new MyThread();
-            myThread.start();
+            if(!isServiceActive) {
+                Log.d("dingyl","MyThread start");
+                MyThread myThread = new MyThread();
+                myThread.start();
+            }
         }else{
             Toast.makeText(MyService.this,"Please inser a USB Device First!",
                     Toast.LENGTH_SHORT).show();
@@ -61,7 +72,7 @@ public class MyService extends Service{
         @Override
         public void run(){
             try {
-                writeLog("logcat",path);
+                writeLog("logcat -v time",path);
             }catch (IOException e){
                 e.printStackTrace();
                 Log.d("dingyl","IOException");
@@ -72,31 +83,38 @@ public class MyService extends Service{
     }
 
     private void writeLog(String cmd,String path) throws IOException {
+        if(sharedPreferences.getBoolean("isChecked",false)) {
+            Runtime.getRuntime().exec(clearLog);
+            Log.d("dingyl","service isChecked is : " + sharedPreferences.getBoolean("isChecked",false));
+        }
         Process process = Runtime.getRuntime().exec(cmd);
         InputStream stream = process.getInputStream();
         File file = new File(path);
         if(!file.exists()){
             file.createNewFile();
         }else{
-            if(file.length() > 20*1024*1024){
+            if(file.length() > 50*1024*1024){
                 file.delete();
                 file.createNewFile();
                 Log.d("dingyl","File is too large!!!");
             }
         }
         FileOutputStream fileOutputStream = new FileOutputStream(path,true);
+        OutputStreamWriter outputStreamWriter = new OutputStreamWriter(fileOutputStream,"UTF-8");
         if(stream != null){
-            InputStreamReader reader = new InputStreamReader(stream);
-            BufferedReader bufferedReader = new BufferedReader(reader, 1024);
-            int line;
-            while (((line = bufferedReader.read())+"")!= null) {
-                fileOutputStream.write(line);
+            InputStreamReader reader = new InputStreamReader(stream,"UTF-8");
+            BufferedReader bufferedReader = new BufferedReader(reader,1024);
+            String line;
+            while ((line = bufferedReader.readLine())!= null) {
+                outputStreamWriter.write(line + "\n");
             }
             bufferedReader.close();
             reader.close();
             stream.close();
             fileOutputStream.close();
+            outputStreamWriter.close();
             process.destroy();
+            isServiceActive = false;
             Log.d("dingyl","release");
         }
     }
